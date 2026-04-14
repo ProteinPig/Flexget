@@ -26,6 +26,7 @@ class OutputQBitTorrent:
           port: <PORT> (default: 8080)
           use_ssl: <SSL> (default: False)
           verify_cert: <VERIFY> (default: True)
+          action: <action on torrents> (default: add)
           path: <OUTPUT_DIR> (default: (none))
           incomplete_path: <INCOMPLETE_OUTPUT_DIR> (default: (none))
           label: <LABEL> (default: (none))
@@ -49,6 +50,11 @@ class OutputQBitTorrent:
                     'port': {'type': 'integer'},
                     'use_ssl': {'type': 'boolean'},
                     'verify_cert': {'type': 'boolean'},
+                    'action': {
+                        'type': 'string',
+                        'enum': ['add', 'pause', 'resume', 'recheck', 'reannounce', 'remove', 'purge']
+                    },
+                    'delete_files': {'type': 'boolean'},
                     'path': {'type': 'string'},
                     'incomplete_path': {'type': 'string'},
                     'label': {'type': 'string'},
@@ -222,6 +228,8 @@ class OutputQBitTorrent:
         config.setdefault('port', 8080)
         config.setdefault('use_ssl', False)
         config.setdefault('verify_cert', True)
+        config.setdefault('action', 'add')
+        config.setdefault('delete_files', False)
         config.setdefault('label', '')
         config.setdefault('tags', [])
         config.setdefault('maxupspeed', 0)
@@ -286,6 +294,48 @@ class OutputQBitTorrent:
             if seeding_time_limit:
                 form_data['seedingTimeLimit'] = int(
                     parse_timedelta(seeding_time_limit).total_seconds() / 60
+                )
+
+            action = entry.get('action', config.get('action', 'add')))
+
+            if action == 'add':
+                self.add_entries(task, config)
+                return
+
+            hashes = [
+                entry.get('torrent_info_hash')
+                for entry in task.accepted
+                if entry.get('torrent_info_hash')
+            ]
+
+            if not hashes:
+                logger.warning('No valid torrent info hashes found for action `%s`', action)
+                return
+
+            hash_str = '|'.join(hashes)
+
+            if action == 'pause':
+                self.client.torrents_pause(hashes=hash_str)
+
+            elif action == 'resume':
+                self.client.torrents_resume(hashes=hash_str)
+
+            elif action == 'recheck':
+                self.client.torrents_recheck(hashes=hash_str)
+
+            elif action == 'reannounce':
+                self.client.torrents_reannounce(hashes=hash_str)
+
+            elif action == 'remove':
+                self.client.torrents_delete(
+                    hashes=hash_str,
+                    delete_files=config.get('delete_files', False)
+                )
+
+            elif action == 'purge':
+                self.client.torrents_delete(
+                    hashes=hash_str,
+                    delete_files=True
                 )
 
             is_magnet = entry['url'].startswith('magnet:')
